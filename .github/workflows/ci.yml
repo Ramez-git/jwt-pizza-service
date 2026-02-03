@@ -5,6 +5,7 @@ on:
     branches:
       - main
   workflow_dispatch:
+
 jobs:
   build:
     name: Build
@@ -12,18 +13,20 @@ jobs:
     outputs:
       version: ${{ steps.set_version.outputs.version }}
     services:
-  mysql:
-    image: mysql:8.0.29
-    env:
-      MYSQL_ROOT_PASSWORD: tempdbpassword
-      MYSQL_DATABASE: pizza
-    ports:
-      - '3306:3306'
-    options: >-
-      --health-cmd "mysqladmin ping -ptempdbpassword" --health-interval 10s --health-start-period 10s --health-timeout 5s --health-retries 10
+      mysql:
+        image: mysql:8.0.29
+        env:
+          MYSQL_ROOT_PASSWORD: tempdbpassword
+          MYSQL_DATABASE: pizza
+        ports:
+          - '3306:3306'
+        options: >-
+          --health-cmd "mysqladmin ping -ptempdbpassword" --health-interval 10s --health-start-period 10s --health-timeout 5s --health-retries 10
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+
       - name: Write config file
         run: |
           echo "module.exports = {
@@ -51,10 +54,13 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
       - name: Tests
         run: npm test
+
       - name: Lint
         run: npm run lint
+
       - name: set version
         id: set_version
         run: |
