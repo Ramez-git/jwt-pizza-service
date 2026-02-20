@@ -360,6 +360,41 @@ class DB {
     const [rows] = await connection.execute(`SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = ?`, [config.db.connection.database]);
     return rows.length > 0;
   }
+async listUsers(page = 1, limit = 10, nameFilter = '*') {
+  const connection = await this.getConnection();
+  page = Math.max(parseInt(page ?? 1, 10), 1);
+  limit = Math.max(parseInt(limit ?? 10, 10), 1);
+  const offset = (page - 1) * limit;
+
+  nameFilter = (nameFilter ?? '*').toString();
+  if (nameFilter === '*' || nameFilter.trim() === '') {
+    nameFilter = '%';
+  } else if (nameFilter.includes('*')) {
+    nameFilter = nameFilter.replace(/\*/g, '%');
+  } else {
+    nameFilter = `%${nameFilter}%`;
+  }
+
+  try {
+    let users = await this.query(
+      connection,
+      `SELECT id, name, email FROM user WHERE name LIKE ? ORDER BY id LIMIT ${limit + 1} OFFSET ${offset}`,
+      [nameFilter]
+    );
+
+    const more = users.length > limit;
+    if (more) users = users.slice(0, limit);
+
+    for (const u of users) {
+      const roleResult = await this.query(connection, `SELECT role, objectId FROM userRole WHERE userId=?`, [u.id]);
+      u.roles = roleResult.map((r) => ({ objectId: r.objectId || undefined, role: r.role }));
+    }
+
+    return { users, more };
+  } finally {
+    connection.end();
+  }
+}
 }
 
 const db = new DB();
