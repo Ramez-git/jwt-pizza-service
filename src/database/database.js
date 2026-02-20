@@ -395,6 +395,25 @@ async listUsers(page = 1, limit = 10, nameFilter = '*') {
     connection.end();
   }
 }
+
+async deleteUser(userId) {
+  const connection = await this.getConnection();
+  try {
+    await connection.beginTransaction();
+    try {
+      await this.query(connection, `DELETE FROM userRole WHERE userId=?`, [userId]);
+      await this.query(connection, `DELETE FROM auth WHERE userId=?`, [userId]);
+      await this.query(connection, `DELETE FROM user WHERE id=?`, [userId]);
+
+      await connection.commit();
+    } catch (err) {
+      await connection.rollback();
+      throw err;
+    }
+  } finally {
+    connection.end();
+  }
+}
 }
 
 const db = new DB();

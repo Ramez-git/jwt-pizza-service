@@ -83,3 +83,28 @@ test('Admin list users supports name filter', async () => {
     expect(u.name.toLowerCase()).toContain('alpha');
   }
 });
+
+test('DELETE /api/user requires auth', async () => {
+  const res = await request(app).delete('/api/user/1');
+  expect(res.status).toBe(401);
+});
+
+test('Non-admin cannot delete user', async () => {
+  const diner = await registerDiner(app);
+  const res = await request(app)
+    .delete(`/api/user/${diner.user.id}`)
+    .set(authHeader(diner.token));
+
+  expect(res.status).toBe(403);
+});
+
+test('Admin can delete user', async () => {
+  const admin = await loginAdmin(app);
+  const diner = await registerDiner(app);
+
+  const res = await request(app)
+    .delete(`/api/user/${diner.user.id}`)
+    .set(authHeader(admin.token));
+
+  expect(res.status).toBe(200);
+});
