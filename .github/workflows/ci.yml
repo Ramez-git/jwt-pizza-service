@@ -12,6 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.set_version.outputs.version }}
+
     services:
       mysql:
         image: mysql:8.0.29
@@ -19,17 +20,27 @@ jobs:
           MYSQL_ROOT_PASSWORD: tempdbpassword
           MYSQL_DATABASE: pizza
         ports:
-          - '3306:3306'
+          - "3306:3306"
         options: >-
-          --health-cmd "mysqladmin ping -ptempdbpassword" --health-interval 10s --health-start-period 10s --health-timeout 5s --health-retries 10
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -ptempdbpassword"
+          --health-interval=10s
+          --health-start-period=10s
+          --health-timeout=5s
+          --health-retries=10
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+
       - name: Write config file
         run: |
-          echo "module.exports = {
+          cat > src/config.js <<EOF
+          module.exports = {
             jwtSecret: '${{ secrets.JWT_SECRET }}',
             db: {
               connection: {
@@ -45,33 +56,48 @@ jobs:
               url: 'https://pizza-factory.cs329.click',
               apiKey: '${{ secrets.FACTORY_API_KEY }}',
             },
-          };" > src/config.js
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22.x'
+          };
+          EOF
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Tests
+      - name: Run tests
         run: npm test
 
-      - name: Lint
+      - name: Run lint
         run: npm run lint
 
-      - name: set version
+      - name: Set version
         id: set_version
         run: |
           version=$(date +'%Y%m%d.%H%M%S')
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          printf '{"version": "%s" }' "$version" > src/version.json
+          printf '{"version": "%s"}' "$version" > src/version.json
+
       - name: Update coverage
         run: |
           coverage=$(jq '.total.lines.pct' coverage/coverage-summary.json)
           color=$(echo "$coverage < 80" | bc | awk '{if ($1) print "red"; else print "green"}')
-          curl -s -X POST "https://pizza-factory.cs329.click/api/badge/${{ secrets.NET_ID }}/jwtpizzaservicecoverage?label=Coverage&value=$coverage%25&color=$color" -H "authorization: bearer ${{ secrets.FACTORY_API_KEY }}"
+          curl -s -X POST "https://pizza-factory.cs329.click/api/badge/${{ secrets.NET_ID }}/jwtpizzaservicecoverage?label=Coverage&value=$coverage%25&color=$color" \
+            -H "authorization: bearer ${{ secrets.FACTORY_API_KEY }}"
+
+      - name: Create dist
+        run: |
+          mkdir dist
+          cp Dockerfile dist/
+          cp -r src/* dist/
+          cp package*.json dist/
+          sed -i "s/root/${{ secrets.DB_USERNAME }}/g" dist/config.js
+          sed -i "s/tempdbpassword/${{ secrets.DB_PASSWORD }}/g" dist/config.js
+          sed -i "s/127.0.0.1/${{ secrets.DB_HOSTNAME }}/g" dist/config.js
+
+      - name: Update distribution artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: package
+          path: dist/
+
   deploy:
     name: Deploy to ECR
     runs-on: ubuntu-latest
@@ -82,11 +108,13 @@ jobs:
       contents: read
 
     env:
-      VERSION: ${{ needs.build.outputs.version }}
+      version: ${{ needs.build.outputs.version }}
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - name: Download distribution artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: package
 
       - name: Create OIDC token to AWS
         uses: aws-actions/configure-aws-credentials@v4
@@ -102,7 +130,7 @@ jobs:
       - name: Set up machine emulation
         uses: docker/setup-qemu-action@v3
 
-      - name: Set up Docker Buildx
+      - name: Set up Docker build
         uses: docker/setup-buildx-action@v3
 
       - name: Build and push container image
@@ -116,5 +144,4 @@ jobs:
             -t $ECR_REGISTRY/$ECR_REPOSITORY:latest \
             --push \
             .
-
           echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:latest" >> "$GITHUB_OUTPUT"
