@@ -1,11 +1,12 @@
 const os = require('os');
 const config = require('./config');
 
-// ─── Counters & Gauges ────────────────────────────────────────────────────────
-
+// ─── Counters (never reset - let them accumulate) ─────────────────────────────
 const requests = { total: 0, get: 0, post: 0, put: 0, delete: 0 };
 const auth = { success: 0, fail: 0 };
 const pizzas = { sold: 0, failed: 0, revenue: 0 };
+
+// ─── Gauges (current value) ───────────────────────────────────────────────────
 const latency = { service: 0, pizza: 0 };
 let activeUsers = 0;
 
@@ -118,37 +119,33 @@ async function sendMetricToGrafana(metricName, metricValue) {
 
 function sendMetricsPeriodically(periodMs = 10000) {
   setInterval(async () => {
-    // HTTP requests
+    // HTTP requests (accumulating counters)
     await sendMetricToGrafana('http_requests_total',  requests.total);
     await sendMetricToGrafana('http_requests_get',    requests.get);
     await sendMetricToGrafana('http_requests_post',   requests.post);
     await sendMetricToGrafana('http_requests_put',    requests.put);
     await sendMetricToGrafana('http_requests_delete', requests.delete);
 
-    // Auth
+    // Auth (accumulating counters)
     await sendMetricToGrafana('auth_success', auth.success);
     await sendMetricToGrafana('auth_fail',    auth.fail);
 
-    // Active users
+    // Active users (gauge - current value)
     await sendMetricToGrafana('active_users', activeUsers);
 
-    // System
+    // System (gauges - current value)
     await sendMetricToGrafana('cpu_usage_percent',    getCpuUsagePercentage());
     await sendMetricToGrafana('memory_usage_percent', getMemoryUsagePercentage());
 
-    // Pizzas
+    // Pizzas (accumulating counters)
     await sendMetricToGrafana('pizzas_sold',   pizzas.sold);
     await sendMetricToGrafana('pizzas_failed', pizzas.failed);
     await sendMetricToGrafana('pizza_revenue', pizzas.revenue);
 
-    // Latency
+    // Latency (gauges - last recorded value)
     await sendMetricToGrafana('latency_service_ms', latency.service);
     await sendMetricToGrafana('latency_pizza_ms',   latency.pizza);
 
-    // Reset per-interval counters
-    requests.total = requests.get = requests.post = requests.put = requests.delete = 0;
-    auth.success = auth.fail = 0;
-    pizzas.sold = pizzas.failed = pizzas.revenue = 0;
   }, periodMs);
 }
 
