@@ -1,16 +1,12 @@
 const os = require('os');
 const config = require('./config');
 
-// ─── Counters (never reset - let them accumulate) ─────────────────────────────
 const requests = { total: 0, get: 0, post: 0, put: 0, delete: 0 };
 const auth = { success: 0, fail: 0 };
 const pizzas = { sold: 0, failed: 0, revenue: 0 };
-
-// ─── Gauges (current value) ───────────────────────────────────────────────────
 const latency = { service: 0, pizza: 0 };
 let activeUsers = 0;
 
-// ─── Middleware ───────────────────────────────────────────────────────────────
 
 function requestTracker(req, res, next) {
   const start = Date.now();
@@ -26,7 +22,6 @@ function requestTracker(req, res, next) {
   next();
 }
 
-// ─── Auth Tracking ────────────────────────────────────────────────────────────
 
 function authAttempt(success) {
   if (success) {
@@ -41,7 +36,6 @@ function userLogout() {
   if (activeUsers > 0) activeUsers--;
 }
 
-// ─── Pizza Purchase Tracking ──────────────────────────────────────────────────
 
 function pizzaPurchase(success, durationMs, price) {
   if (success) {
@@ -53,7 +47,6 @@ function pizzaPurchase(success, durationMs, price) {
   latency.pizza = durationMs;
 }
 
-// ─── System Metrics ───────────────────────────────────────────────────────────
 
 function getCpuUsagePercentage() {
   const cpuUsage = os.loadavg()[0] / os.cpus().length;
@@ -65,87 +58,76 @@ function getMemoryUsagePercentage() {
   return parseFloat(((used / os.totalmem()) * 100).toFixed(2));
 }
 
-// ─── Send a single gauge metric to Grafana ───────────────────────────────────
+function toPrometheusLine(name, value, labels = {}) {
+  const labelStr = Object.entries(labels)
+    .map(([k, v]) => `${k}="${v}"`)
+    .join(',');
+  const labelPart = labelStr ? `{${labelStr}}` : '';
+  return `# TYPE ${name} gauge\n${name}${labelPart} ${value}`;
+}
 
-async function sendMetricToGrafana(metricName, metricValue) {
-  const body = JSON.stringify({
-    resourceMetrics: [
-      {
-        scopeMetrics: [
-          {
-            metrics: [
-              {
-                name: metricName,
-                unit: '1',
-                gauge: {
-                  dataPoints: [
-                    {
-                      asDouble: metricValue,
-                      timeUnixNano: Date.now() * 1_000_000,
-                      attributes: [
-                        { key: 'source', value: { stringValue: config.metrics.source } },
-                      ],
-                    },
-                  ],
-                },
-              },
-            ],
-          },
-        ],
-      },
-    ],
-  });
+async function sendToGrafana(metricLines) {
+  const body = metricLines.join('\n');
 
   try {
     const response = await fetch(config.metrics.endpointUrl, {
       method: 'POST',
-      body,
       headers: {
-        Authorization: `Bearer ${config.metrics.accountId}:${config.metrics.apiKey}`,
-        'Content-Type': 'application/json',
+        'Content-Type': 'text/plain',
+        Authorization:
+          'Basic ' +
+          Buffer.from(`${config.metrics.accountId}:${config.metrics.apiKey}`).toString('base64'),
       },
+      body,
     });
 
     if (!response.ok) {
-      const text = await response.text();
-      console.error(`Failed to push metric [${metricName}]: ${text}`);
+      console.error('Failed to send metrics to Grafana:', response.status, await response.text());
     }
   } catch (err) {
-    console.error('Error sending metric:', err.message);
+    console.error('Error sending metrics:', err.message);
   }
 }
 
-// ─── Periodic Reporting ───────────────────────────────────────────────────────
-
 function sendMetricsPeriodically(periodMs = 10000) {
   setInterval(async () => {
-    // HTTP requests (accumulating counters)
-    await sendMetricToGrafana('http_requests_total',  requests.total);
-    await sendMetricToGrafana('http_requests_get',    requests.get);
-    await sendMetricToGrafana('http_requests_post',   requests.post);
-    await sendMetricToGrafana('http_requests_put',    requests.put);
-    await sendMetricToGrafana('http_requests_delete', requests.delete);
+    const src = config.metrics.source;
 
-    // Auth (accumulating counters)
-    await sendMetricToGrafana('auth_success', auth.success);
-    await sendMetricToGrafana('auth_fail',    auth.fail);
+    const lines = [
+      // HTTP
+      toPrometheusLine('http_requests_total',  requests.total,  { source: src }),
+      toPrometheusLine('http_requests_get',    requests.get,    { source: src }),
+      toPrometheusLine('http_requests_post',   requests.post,   { source: src }),
+      toPrometheusLine('http_requests_put',    requests.put,    { source: src }),
+      toPrometheusLine('http_requests_delete', requests.delete, { source: src }),
 
-    // Active users (gauge - current value)
-    await sendMetricToGrafana('active_users', activeUsers);
+      // Auth
+      toPrometheusLine('auth_success', auth.success, { source: src }),
+      toPrometheusLine('auth_fail',    auth.fail,    { source: src }),
 
-    // System (gauges - current value)
-    await sendMetricToGrafana('cpu_usage_percent',    getCpuUsagePercentage());
-    await sendMetricToGrafana('memory_usage_percent', getMemoryUsagePercentage());
+      // Users
+      toPrometheusLine('active_users', activeUsers, { source: src }),
 
-    // Pizzas (accumulating counters)
-    await sendMetricToGrafana('pizzas_sold',   pizzas.sold);
-    await sendMetricToGrafana('pizzas_failed', pizzas.failed);
-    await sendMetricToGrafana('pizza_revenue', pizzas.revenue);
+      // System
+      toPrometheusLine('cpu_usage_percent',    getCpuUsagePercentage(),    { source: src }),
+      toPrometheusLine('memory_usage_percent', getMemoryUsagePercentage(), { source: src }),
 
-    // Latency (gauges - last recorded value)
-    await sendMetricToGrafana('latency_service_ms', latency.service);
-    await sendMetricToGrafana('latency_pizza_ms',   latency.pizza);
+      // Pizzas
+      toPrometheusLine('pizzas_sold',    pizzas.sold,    { source: src }),
+      toPrometheusLine('pizzas_failed',  pizzas.failed,  { source: src }),
+      toPrometheusLine('pizza_revenue',  pizzas.revenue, { source: src }),
 
+      // Latency (ms)
+      toPrometheusLine('latency_service_ms', latency.service, { source: src }),
+      toPrometheusLine('latency_pizza_ms',   latency.pizza,   { source: src }),
+    ];
+
+    await sendToGrafana(lines);
+
+    // Reset per-interval counters
+    requests.total = requests.get = requests.post = requests.put = requests.delete = 0;
+    auth.success = auth.fail = 0;
+    pizzas.sold = pizzas.failed = pizzas.revenue = 0;
   }, periodMs);
 }
 
