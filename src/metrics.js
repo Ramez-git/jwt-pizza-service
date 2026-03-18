@@ -64,34 +64,31 @@ function getMemoryUsagePercentage() {
   return parseFloat(((used / os.totalmem()) * 100).toFixed(2));
 }
 
-// ─── OTel Metric Builder ──────────────────────────────────────────────────────
+// ─── Send a single gauge metric to Grafana ───────────────────────────────────
 
-function buildMetric(name, value, type, unit) {
-  const dataPoint = {
-    asInt: Math.round(value),
-    timeUnixNano: Date.now() * 1_000_000,
-    attributes: [{ key: 'source', value: { stringValue: config.metrics.source } }],
-  };
-
-  const metric = { name, unit, [type]: { dataPoints: [dataPoint] } };
-
-  if (type === 'sum') {
-    metric[type].aggregationTemporality = 'AGGREGATION_TEMPORALITY_CUMULATIVE';
-    metric[type].isMonotonic = true;
-  }
-
-  return metric;
-}
-
-// ─── Send to Grafana ──────────────────────────────────────────────────────────
-
-async function sendMetricToGrafana(metricName, metricValue, type, unit) {
+async function sendMetricToGrafana(metricName, metricValue) {
   const body = JSON.stringify({
     resourceMetrics: [
       {
         scopeMetrics: [
           {
-            metrics: [buildMetric(metricName, metricValue, type, unit)],
+            metrics: [
+              {
+                name: metricName,
+                unit: '1',
+                gauge: {
+                  dataPoints: [
+                    {
+                      asDouble: metricValue,
+                      timeUnixNano: Date.now() * 1_000_000,
+                      attributes: [
+                        { key: 'source', value: { stringValue: config.metrics.source } },
+                      ],
+                    },
+                  ],
+                },
+              },
+            ],
           },
         ],
       },
@@ -110,7 +107,7 @@ async function sendMetricToGrafana(metricName, metricValue, type, unit) {
 
     if (!response.ok) {
       const text = await response.text();
-      console.error(`Failed to push metric [${metricName}] to Grafana: ${text}`);
+      console.error(`Failed to push metric [${metricName}]: ${text}`);
     }
   } catch (err) {
     console.error('Error sending metric:', err.message);
@@ -121,32 +118,32 @@ async function sendMetricToGrafana(metricName, metricValue, type, unit) {
 
 function sendMetricsPeriodically(periodMs = 10000) {
   setInterval(async () => {
-    // HTTP requests (sum)
-    await sendMetricToGrafana('http_requests_total',  requests.total,  'sum', '1');
-    await sendMetricToGrafana('http_requests_get',    requests.get,    'sum', '1');
-    await sendMetricToGrafana('http_requests_post',   requests.post,   'sum', '1');
-    await sendMetricToGrafana('http_requests_put',    requests.put,    'sum', '1');
-    await sendMetricToGrafana('http_requests_delete', requests.delete, 'sum', '1');
+    // HTTP requests
+    await sendMetricToGrafana('http_requests_total',  requests.total);
+    await sendMetricToGrafana('http_requests_get',    requests.get);
+    await sendMetricToGrafana('http_requests_post',   requests.post);
+    await sendMetricToGrafana('http_requests_put',    requests.put);
+    await sendMetricToGrafana('http_requests_delete', requests.delete);
 
-    // Auth (sum)
-    await sendMetricToGrafana('auth_success', auth.success, 'sum', '1');
-    await sendMetricToGrafana('auth_fail',    auth.fail,    'sum', '1');
+    // Auth
+    await sendMetricToGrafana('auth_success', auth.success);
+    await sendMetricToGrafana('auth_fail',    auth.fail);
 
-    // Active users (gauge)
-    await sendMetricToGrafana('active_users', activeUsers, 'gauge', '1');
+    // Active users
+    await sendMetricToGrafana('active_users', activeUsers);
 
-    // System (gauge)
-    await sendMetricToGrafana('cpu_usage_percent',    getCpuUsagePercentage(),    'gauge', '%');
-    await sendMetricToGrafana('memory_usage_percent', getMemoryUsagePercentage(), 'gauge', '%');
+    // System
+    await sendMetricToGrafana('cpu_usage_percent',    getCpuUsagePercentage());
+    await sendMetricToGrafana('memory_usage_percent', getMemoryUsagePercentage());
 
-    // Pizzas (sum)
-    await sendMetricToGrafana('pizzas_sold',   pizzas.sold,    'sum', '1');
-    await sendMetricToGrafana('pizzas_failed', pizzas.failed,  'sum', '1');
-    await sendMetricToGrafana('pizza_revenue', pizzas.revenue, 'sum', '1');
+    // Pizzas
+    await sendMetricToGrafana('pizzas_sold',   pizzas.sold);
+    await sendMetricToGrafana('pizzas_failed', pizzas.failed);
+    await sendMetricToGrafana('pizza_revenue', pizzas.revenue);
 
-    // Latency (gauge)
-    await sendMetricToGrafana('latency_service_ms', latency.service, 'gauge', 'ms');
-    await sendMetricToGrafana('latency_pizza_ms',   latency.pizza,   'gauge', 'ms');
+    // Latency
+    await sendMetricToGrafana('latency_service_ms', latency.service);
+    await sendMetricToGrafana('latency_pizza_ms',   latency.pizza);
 
     // Reset per-interval counters
     requests.total = requests.get = requests.post = requests.put = requests.delete = 0;
