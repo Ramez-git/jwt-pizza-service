@@ -2,6 +2,14 @@ const request = require('supertest');
 const app = require('../../service');
 const { registerDiner, loginAdmin, authHeader } = require('./testUtils');
 
+jest.mock('../../logger', () => ({
+  httpLogger: (req, res, next) => next(),
+  dbLogger: jest.fn(),
+  factoryLogger: jest.fn(),
+  exceptionLogger: jest.fn(),
+  log: jest.fn(),
+}));
+
 describe('orderRouter', () => {
   beforeEach(() => {
     global.fetch = jest.fn();
