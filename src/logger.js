@@ -9,8 +9,9 @@ class Logger {
         path: req.originalUrl,
         method: req.method,
         statusCode: res.statusCode,
+        ip: req.ip || req.headers['x-forwarded-for'],
         reqBody: JSON.stringify(req.body),
-        resBody: JSON.stringify(resBody),
+        resBody: typeof resBody === 'string' ? resBody : JSON.stringify(resBody),
       };
       const level = this.statusToLogLevel(res.statusCode);
       this.log(level, 'http', logData);
