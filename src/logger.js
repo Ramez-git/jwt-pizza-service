@@ -6,7 +6,7 @@ class Logger {
     res.send = (resBody) => {
       const logData = {
         authorized: !!req.headers.authorization,
-        path: req.originalUrl,
+        path: (req.headers['x-forwarded-host'] || req.headers.host || '') + req.path,
         method: req.method,
         statusCode: res.statusCode,
         ip: req.ip || req.headers['x-forwarded-for'],
