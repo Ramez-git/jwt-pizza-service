@@ -4,6 +4,7 @@ const { Role, DB } = require('../database/database.js');
 const { authRouter } = require('./authRouter.js');
 const { asyncHandler, StatusCodeError } = require('../endpointHelper.js');
 const metrics = require('../metrics.js');
+const logger = require('../logger.js');
 const orderRouter = express.Router();
 orderRouter.docs = [
   {
@@ -38,6 +39,7 @@ orderRouter.docs = [
     response: { order: { franchiseId: 1, storeId: 1, items: [{ menuId: 1, description: 'Veggie', price: 0.05 }], id: 1 }, jwt: '1111111111' },
   },
 ];
+
 // getMenu
 orderRouter.get(
   '/menu',
@@ -45,6 +47,7 @@ orderRouter.get(
     res.send(await DB.getMenu());
   })
 );
+
 // addMenuItem
 orderRouter.put(
   '/menu',
@@ -58,6 +61,7 @@ orderRouter.put(
     res.send(await DB.getMenu());
   })
 );
+
 // getOrders
 orderRouter.get(
   '/',
@@ -66,6 +70,7 @@ orderRouter.get(
     res.json(await DB.getOrders(req.user, req.query.page));
   })
 );
+
 // createOrder
 orderRouter.post(
   '/',
@@ -73,16 +78,16 @@ orderRouter.post(
   asyncHandler(async (req, res) => {
     const orderReq = req.body;
     const order = await DB.addDinerOrder(req.user, orderReq);
-
     const start = Date.now();
+    const factoryReqBody = { diner: { id: req.user.id, name: req.user.name, email: req.user.email }, order };
     const r = await fetch(`${config.factory.url}/api/order`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', authorization: `Bearer ${config.factory.apiKey}` },
-      body: JSON.stringify({ diner: { id: req.user.id, name: req.user.name, email: req.user.email }, order }),
+      body: JSON.stringify(factoryReqBody),
     });
     const latencyMs = Date.now() - start;
     const j = await r.json();
-
+    logger.factoryLogger(factoryReqBody, j);
     if (r.ok) {
       const totalPrice = order.items.reduce((sum, item) => sum + item.price, 0);
       metrics.pizzaPurchase(true, latencyMs, totalPrice);
@@ -93,4 +98,5 @@ orderRouter.post(
     }
   })
 );
+
 module.exports = orderRouter;

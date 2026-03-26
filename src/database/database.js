@@ -294,6 +294,8 @@ class DB {
   }
 
   async query(connection, sql, params) {
+    const logger = require('../logger.js');
+    logger.dbLogger(sql);
     const [results] = await connection.execute(sql, params);
     return results;
   }
